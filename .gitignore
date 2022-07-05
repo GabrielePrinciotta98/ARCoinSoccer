@@ -398,6 +398,7 @@ FodyWeavers.xsd
 *.sln.iml
 /out
 /CMakeFiles
+CMakeCache.txt
 
 *.sln
 *.vcxproj
@@ -405,3 +406,6 @@ FodyWeavers.xsd
 *.mp4
 *.cmake
 CMakeLists.txt
+
+Makefile
+lib*.so*
