@@ -1,5 +1,5 @@
 #include <opencv\cv.hpp>
-#include <CoinTracker.h>
+#include "CoinTracker.h"
 
 using namespace cv;
 using namespace std;

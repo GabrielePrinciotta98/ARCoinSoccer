@@ -52,11 +52,11 @@ void MarkerTracker::init()
 	cvResizeWindow(kWinName1.c_str(), 1024, 768);
 
 	int max = 255;
-	int slider_value = 100;
-	cv::createTrackbar( "Threshold", kWinName2, &slider_value, 255, trackbarHandler, &slider_value);
+	int slider_value = thresh;
+	cv::createTrackbar( "Threshold", kWinName2, &slider_value, max, trackbarHandler, &thresh);
 
 	int bw_sileder_value = bw_thresh;
-	cv::createTrackbar( "BW Threshold", kWinName2, &slider_value, 255, bw_trackbarHandler, &bw_sileder_value);
+	cv::createTrackbar( "BW Threshold", kWinName2, &bw_sileder_value, max, bw_trackbarHandler, &bw_thresh);
 	
 	memStorage = cvCreateMemStorage();
 }
@@ -72,16 +72,15 @@ void MarkerTracker::cleanup()
 	std::cout << "Finished\n";
 }
 
-void MarkerTracker::findMarker( cv::Mat &img_bgr, float resultMatrix[16] )
+bool MarkerTracker::findMarker( cv::Mat &img_bgr, float resultMatrix[16] )
 {
-	bool isFirstStripe = false;
-
+	bool foundMarker = false;
+	bool isFirstStripe = true;
 	bool isFirstMarker = true;
 
-
 	{
-		cv::cvtColor( img_bgr, img_gray, CV_BGR2GRAY );
-		cv::threshold( img_gray, img_mono, thresh, 255, CV_THRESH_BINARY);
+		cv::cvtColor( img_bgr, img_gray, CV_BGR2GRAY);
+		cv::threshold( img_gray, img_mono, thresh, 255, cv::THRESH_BINARY);
 
 		// Find Contours with old OpenCV APIs
 		CvSeq* contours;
@@ -260,7 +259,7 @@ void MarkerTracker::findMarker( cv::Mat &img_bgr, float resultMatrix[16] )
 					{
 						cv::Mat iplTmp;
 						cv::resize( iplStripe, iplTmp, cv::Size(100,300) );
-						//cv::imshow ( kWinName3, iplTmp );//iplStripe );
+						cv::imshow ( kWinName3, iplTmp );//iplStripe );
 						isFirstStripe = false;
 					}
 
@@ -441,6 +440,7 @@ void MarkerTracker::findMarker( cv::Mat &img_bgr, float resultMatrix[16] )
 			
 
 			estimateSquarePose( resultMatrix, (cv::Point2f*)corners, kMarkerSize );
+			foundMarker = true;
 			/*
 			//this part is only for printing
 			for (int i = 0; i<4; ++i) {
@@ -462,14 +462,10 @@ void MarkerTracker::findMarker( cv::Mat &img_bgr, float resultMatrix[16] )
 		} // end of loop over contours
 
 		cv::imshow(kWinName1, img_bgr);
-		//cv::imshow(kWinName2, img_mono);
-
-
+		cv::imshow(kWinName2, img_mono);
 
 		isFirstStripe = true;
-
 		isFirstMarker = true;
-
 
 		cvClearMemStorage ( memStorage );
 	} // end of main loop
@@ -478,4 +474,6 @@ void MarkerTracker::findMarker( cv::Mat &img_bgr, float resultMatrix[16] )
 
 	int key = cvWaitKey (10);
 	if (key == 27) exit(0);
+
+	return foundMarker;
 }

@@ -29,7 +29,7 @@ public:
 	~MarkerTracker(){
 		cleanup();
 	}
-	void findMarker( cv::Mat &img_bgr, float resultMatrix[16] );
+	bool findMarker( cv::Mat &img_bgr, float resultMatrix[16] );
 protected:
 	void init( );
 	void cleanup( );

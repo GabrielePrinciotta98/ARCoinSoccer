@@ -578,7 +578,7 @@ void estimateSquarePose_( float* mat,  CvPoint2D32f* p2D, float markerSize )
 // Returns Matrix in Row-major format
 void calcHomography( float* pResult, const CvPoint2D32f* pQuad )
 	{
-	// homography computation ÅEla Harker & O'Leary, simplified for squares
+	// homography computation ÔøΩEla Harker & O'Leary, simplified for squares
 
 	// subtract mean from points
 	CvPoint2D32f c[ 4 ];
