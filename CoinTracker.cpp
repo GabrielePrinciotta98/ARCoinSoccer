@@ -1,4 +1,4 @@
-#include <opencv\cv.hpp>
+#include <opencv/cv.hpp>
 #include <iostream>
 #include "CoinTracker.h"
 

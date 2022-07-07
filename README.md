@@ -1,4 +1,5 @@
-# ARCoinSoccer
+# Coin SoccAR
+Augmented Reality game inspired by the quite popular tabletop game [penny football](https://en.wikipedia.org/wiki/Penny_football).
 
 # Assets
 Soccerball model by petomavar (https://www.turbosquid.com/de/3d-models/3d-max-soccer-ball/408588)

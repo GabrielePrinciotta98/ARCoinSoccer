@@ -1,6 +1,6 @@
 #include <fstream>
 #include <sstream>
-#include <opencv\cv.hpp>
+#include <opencv/cv.hpp>
 
 #include "ObjLoader.h"
 #include "lodepng.h"
