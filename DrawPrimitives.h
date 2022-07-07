@@ -92,7 +92,7 @@ void drawCylinder(GLdouble base, GLdouble height, GLint slices)
 
 	// draw the base of the cylinder
 	glBegin(GL_TRIANGLE_FAN);
-	glNormal3f(0, -1, 0);
+	glNormal3f(0, 0, -1);
 	glVertex3f(0, 0, 0);
 	for (int s = 0; s <= slices; s++) {
 		double angle = s / (double)slices * M_PI * 2;
@@ -102,7 +102,7 @@ void drawCylinder(GLdouble base, GLdouble height, GLint slices)
 
 	// draw the top of the cone
 	glBegin(GL_TRIANGLE_FAN);
-	glNormal3f(0, 1, 0);
+	glNormal3f(0, 0, 1);
 	glVertex3f(0, 0, height);
 	for (int s = 0; s <= slices; s++) {
 		double angle = -s / (double)slices * M_PI * 2;
