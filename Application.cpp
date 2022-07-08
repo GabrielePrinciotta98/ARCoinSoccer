@@ -9,8 +9,10 @@
 #include "PoseEstimation.h"
 #include "ObjLoader.h"
 
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || defined(_WIN64)
 #include <windows.h>
 #include <mmsystem.h>
+#endif
 #include <GL/freeglut.h>
 #include <GL/glut.h>
 
@@ -148,6 +150,7 @@ int main(int argc, char* argv[])
         float fastestVel = 0;
         int fastest = -1;
 
+
         if (!ballMoving && coins.size() > 3)
             coins.resize(3);
 
@@ -159,7 +162,7 @@ int main(int argc, char* argv[])
             c.pos3D[2] = smoothedZ;
 
             float vel = c.vel[2];
-            if (fastest == -1 || fastestVel < vel)
+            if ((fastest == -1 || fastestVel < vel) && i == 2)
             {
                 fastestVel = vel;
                 fastest = i;
@@ -244,7 +247,9 @@ int main(int argc, char* argv[])
                     if (signbit(lastDist) != signbit(dist))
                     {
                         cout << "Goal" << "\n";
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || defined(_WIN64)
                         PlaySound(TEXT("goal.wav"), NULL, SND_FILENAME | SND_ASYNC);
+#endif
                         goals++;
                         Point start(cvRound(pos1[0] / downscale), cvRound(pos1[1] / downscale));
                         Point end(cvRound(pos2[0] / downscale), cvRound(pos2[1] / downscale));
