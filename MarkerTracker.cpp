@@ -52,11 +52,9 @@ void MarkerTracker::init()
 	cvResizeWindow(kWinName1.c_str(), 1024, 768);
 
 	int max = 255;
-	int slider_value = thresh;
-	cv::createTrackbar( "Threshold", kWinName2, &slider_value, max, trackbarHandler, &thresh);
+	cv::createTrackbar( "Threshold", kWinName2, &thresh, max, trackbarHandler, &thresh);
 
-	int bw_sileder_value = bw_thresh;
-	cv::createTrackbar( "BW Threshold", kWinName2, &bw_sileder_value, max, bw_trackbarHandler, &bw_thresh);
+	cv::createTrackbar( "BW Threshold", kWinName2, &bw_thresh, max, bw_trackbarHandler, &bw_thresh);
 	
 	memStorage = cvCreateMemStorage();
 }
