@@ -11,7 +11,12 @@
 
 #include <windows.h>
 #include <mmsystem.h>
+#include <GL/freeglut.h>
+#include <GL/glut.h>
 
+#define FREEGLUT_STATIC
+#define _LIB
+#define FREEGLUT_LIB_PRAGMAS 0
 //#define CAMERA
 
 using namespace cv;
@@ -44,7 +49,7 @@ const bool shadowMapping = true;
 float lightProjectionMatrix[16], lightViewMatrix[16], textureMatrix[16];
 float cameraProjectionMatrix[16], cameraViewMatrix[16];
 float smoothedZ = 100;
-
+int goals = 0;
 GLuint vignetteTexture;
 ObjModel soccerModel("soccer_ball.obj", "soccer_ball_diffuse.png");
 ObjModel shoeModel("football_boots.obj", "");
@@ -69,7 +74,7 @@ int main(int argc, char* argv[])
 
     if (!glfwInit())
         return -1;
-
+    glutInit(&argc, argv);
     glfwWindowHint(GLFW_SRGB_CAPABLE, GLFW_TRUE);
     glfwWindowHint(GLFW_SAMPLES, 8);
    //glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
@@ -240,10 +245,11 @@ int main(int argc, char* argv[])
                     {
                         cout << "Goal" << "\n";
                         PlaySound(TEXT("goal.wav"), NULL, SND_FILENAME | SND_ASYNC);
-
+                        goals++;
                         Point start(cvRound(pos1[0] / downscale), cvRound(pos1[1] / downscale));
                         Point end(cvRound(pos2[0] / downscale), cvRound(pos2[1] / downscale));
                         line(img_background2, start, end, Scalar(0, 0, 255), 5);
+
                     }
                 }
 
@@ -770,7 +776,7 @@ void drawOverlays(float* markerMatrix, vector<Coin>& coins, bool ball, bool mark
     {
         const Vec3f& v1 = coins[0].pos3D;
         const Vec3f& v2 = coins[1].pos3D;
-
+        
         float width = 0.0025;
         float length = 0.01;
 
@@ -834,7 +840,26 @@ void drawOverlays(float* markerMatrix, vector<Coin>& coins, bool ball, bool mark
 
         glEnd();
     }
+    if (goals > 0) {
+        glMatrixMode(GL_PROJECTION);
+        glPushMatrix();
+        glLoadIdentity();
+        gluOrtho2D(0, windowWidth, 0, windowHeight);
+
+        glRasterPos2i(20, 20);  // or wherever in window coordinates
+
+        glColor4f(1, 0, 0,1);
+        glRasterPos2f(20, 20);
+        std::string scoreText = "Score: ";
+        scoreText += std::to_string(goals);
+        const unsigned char* score = reinterpret_cast<const unsigned char*>(scoreText.c_str());
+
+        glutBitmapString(GLUT_BITMAP_TIMES_ROMAN_24, score);
+        glPopMatrix();
+
+    }
 }
+
 
 void reshape(GLFWwindow* window, int width, int height)
 {
