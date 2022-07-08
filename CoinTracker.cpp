@@ -127,15 +127,13 @@ void CoinTracker::init()
 	namedWindow(kWinName, CV_WINDOW_NORMAL);
 
 	int max = 100;
-	int slider1 = coinSize;
+	slider1 = coinSize;
+	slider2 = houghParam1;
+	slider3 = houghParam2;
+
 	cv::createTrackbar("Coin size", kWinName, &slider1, max, handler, &coinSize);
-
-	int slider2 = houghParam1;
 	cv::createTrackbar("Hough param 1", kWinName, &slider2, max, handler, &houghParam1);
-
-	int slider3 = houghParam2;
 	cv::createTrackbar("Hough param 2", kWinName, &slider3, max, handler, &houghParam2);
-
 };
 
 void CoinTracker::cleanup()

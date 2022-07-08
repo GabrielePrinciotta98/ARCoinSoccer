@@ -25,6 +25,7 @@ public:
 
 protected:
 	size_t idCounter;
+	int slider1, slider2, slider3;
 	void init();
 	void cleanup();
 };

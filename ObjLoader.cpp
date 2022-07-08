@@ -155,7 +155,7 @@ void ObjModel::init()
 
                 if (i1 <= 0 || i1 > verts.size() || i2 > texCos.size() || i3 > norms.size())
                 {
-                    std::cout << "Index out of bounds in .obj (" << objFile << "): " << line << "\n";
+                    //std::cout << "Index out of bounds in .obj (" << objFile << "): " << line << "\n";
                     continue;
                 }
 
