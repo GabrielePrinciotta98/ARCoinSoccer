@@ -14,7 +14,7 @@ void CoinTracker::findCoins(cv::Mat& img, vector<Coin>& lastCoins, vector<Coin>&
 
 	vector<Vec3f> circles;
 
-	HoughCircles(grayScale, circles, HOUGH_GRADIENT, 2, coinSize * 2, 40.0, 30.0, coinSize, coinSize * 1.5);
+	HoughCircles(grayScale, circles, HOUGH_GRADIENT, 2, coinSize * 2, houghParam1, houghParam2, coinSize, coinSize * 1.5);
 
 	coins.clear();
 	for (size_t i = 0; i < lastCoins.size(); i++)
@@ -117,10 +117,25 @@ void CoinTracker::findCoins(cv::Mat& img, vector<Coin>& lastCoins, vector<Coin>&
 	imshow(kWinName, img);
 };
 
+void handler(int pos, void* slider_value) {
+	*((double*)slider_value) = max(1, pos);
+}
+
 void CoinTracker::init()
 {
 	idCounter = 0;
 	namedWindow(kWinName, CV_WINDOW_NORMAL);
+
+	int max = 100;
+	int slider1 = coinSize;
+	cv::createTrackbar("Coin size", kWinName, &slider1, max, handler, &coinSize);
+
+	int slider2 = houghParam1;
+	cv::createTrackbar("Hough param 1", kWinName, &slider2, max, handler, &houghParam1);
+
+	int slider3 = houghParam2;
+	cv::createTrackbar("Hough param 2", kWinName, &slider3, max, handler, &houghParam2);
+
 };
 
 void CoinTracker::cleanup()
