@@ -5,6 +5,8 @@
 using namespace cv;
 using namespace std;
 
+#define OPENCV_WINDOWS
+
 void CoinTracker::findCoins(cv::Mat& img, vector<Coin>& lastCoins, vector<Coin>& coins)
 {
 	cv::Mat grayScale;
@@ -14,7 +16,7 @@ void CoinTracker::findCoins(cv::Mat& img, vector<Coin>& lastCoins, vector<Coin>&
 
 	vector<Vec3f> circles;
 
-	HoughCircles(grayScale, circles, HOUGH_GRADIENT, 2, coinSize * 2, houghParam1, houghParam2, coinSize, coinSize * 1.5);
+	HoughCircles(grayScale, circles, HOUGH_GRADIENT, 2, coinDist, houghParam1, houghParam2, coinSize, coinSize2);
 
 	coins.clear();
 	for (size_t i = 0; i < lastCoins.size(); i++)
@@ -114,7 +116,9 @@ void CoinTracker::findCoins(cv::Mat& img, vector<Coin>& lastCoins, vector<Coin>&
 	std::string nCircles = to_string(circles.size());
 	putText(img, nCircles, Point(100, 100), FONT_HERSHEY_SIMPLEX, 3, (0, 0, 0), 2);
 
+#ifdef OPENCV_WINDOWS
 	imshow(kWinName, img);
+#endif
 };
 
 void handler(int pos, void* slider_value) {
@@ -123,21 +127,29 @@ void handler(int pos, void* slider_value) {
 
 void CoinTracker::init()
 {
+#ifdef OPENCV_WINDOWS
 	idCounter = 0;
 	namedWindow(kWinName, CV_WINDOW_NORMAL);
 
 	int max = 100;
 	slider1 = coinSize;
-	slider2 = houghParam1;
-	slider3 = houghParam2;
+	slider2 = coinSize2;
+	slider3 = coinDist;
+	slider4 = houghParam1;
+	slider5 = houghParam2;
 
 	cv::createTrackbar("Coin size", kWinName, &slider1, max, handler, &coinSize);
-	cv::createTrackbar("Hough param 1", kWinName, &slider2, max, handler, &houghParam1);
-	cv::createTrackbar("Hough param 2", kWinName, &slider3, max, handler, &houghParam2);
+	cv::createTrackbar("Max Coin size", kWinName, &slider2, max, handler, &coinSize2);
+	cv::createTrackbar("Coin dist", kWinName, &slider3, max, handler, &coinDist);
+	cv::createTrackbar("Hough param 1", kWinName, &slider4, max, handler, &houghParam1);
+	cv::createTrackbar("Hough param 2", kWinName, &slider5, max, handler, &houghParam2);
+#endif
 };
 
 void CoinTracker::cleanup()
 {
+#ifdef OPENCV_WINDOWS
 	destroyWindow(kWinName);
+#endif
 };
 

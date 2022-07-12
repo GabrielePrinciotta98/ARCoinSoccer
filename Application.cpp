@@ -60,8 +60,8 @@ GLuint vignetteTexture;
 ObjModel soccerModel("soccer_ball.obj", "soccer_ball_diffuse.png"), 
 shoeModel("football_boots.obj", { Vec4f(1, 1, 1, 1), Vec4f(0.2, 0.2, 0.2, 1), Vec4f(1, 1, 1, 1), Vec4f(0.8, 0.8, 0.8, 1), Vec4f(0.2, 0.2, 0.2, 1), Vec4f(0, 0, 0, 1) }),
 coinModel("coin.obj", { Vec4f(1.0, 0.75, 0.3, 1.0), Vec4f(0.8, 0.8, 0.8, 1.0) });
-Texture titleTex("title.png"), creditTex("credits.png"), anyKeyTex("anykey.png"), moveCoinTex("moveCoins.png"), noMarkerTex("noMarker.png"), noTrackingTex("noTracking.png"), winTex("victory.png"), circleTex("circle.png");
-ParticleSystem uiSystem(""), ballFxSystem("Cloud.png");
+Texture titleTex("title.png"), creditTex("credits.png"), anyKeyTex("anykey.png"), moveCoinTex("moveCoins.png"), noMarkerTex("noMarker.png"), noTrackingTex("noTracking.png"), winTex("victory.png"), circleTex("circle.png"), goalTex("goal.png");
+ParticleSystem uiSystem(""), ballFxSystem("Cloud.png"), goalFxSystem("");
 
 const bool startPos = true;
 Vec3f startPositions[] = { Vec3f(0, -0.5f, 0), Vec3f(-0.2f, -0.25f, 0), Vec3f(0.3f, -0.3f, 0) };
@@ -78,15 +78,19 @@ enum class GameState
     VICTORY
 };
 
-GameState gameState = GameState::TITLE;
+GameState gameState = GameState::GAME;
 float lastGameStateChange;
+
+bool ballMoving;
+Vec3f coinMoveStartPos;
+float lastGoal = -100;
 
 int main(int argc, char* argv[])
 {
     //Set up OpenCV
 #ifdef CAMERA
-    cv::VideoCapture cap(1);
-    //cv::VideoCapture cap("CoinSoccerMovie3.mp4");
+    //cv::VideoCapture cap(1);
+    cv::VideoCapture cap("CoinSoccerMovie4.mp4");
 #else
     cv::VideoCapture cap("CoinSoccerMovie.mp4");
 #endif
@@ -142,8 +146,8 @@ int main(int argc, char* argv[])
     std::vector<Coin> coins;
     cv::Vec2f lastBallPosition(0, 0);
     int framesWithoutMovement = 60;
+    bool detectedGoalThisTurn = false;
     size_t ballID = -1;
-    bool ballMoving = false;
 
     cv::Mat img_background, img_background_resized, img_background2;
     float resultMatrix[16];
@@ -191,6 +195,8 @@ int main(int argc, char* argv[])
 
         if (gameState == GameState::GAME)
         {
+            bool prevBallMoving = ballMoving;
+
             float closestDist = 0;
             int closest = -1;
             float fastestVel = 0;
@@ -204,16 +210,19 @@ int main(int argc, char* argv[])
                 Coin& c = coins[i];
 
                 float vel = c.vel[2];
-				if ((fastest == -1 || fastestVel < vel) && i == 2)
+                float dx = lastBallPosition[0] - c.pos2D[0];
+                float dy = lastBallPosition[1] - c.pos2D[1];
+                float dist = dx * dx + dy * dy;
+				if ((fastest == -1 || fastestVel < vel) && (!ballMoving || dist < coinTracker.coinSize * coinTracker.coinSize * 12 * 12 && i > 1))
                 {
                     fastestVel = vel;
                     fastest = i;
                 }
 
-                float dx = c.pos3D[0] - x;
-                float dy = c.pos3D[1] - y;
-                float dist = dx * dx + dy * dy;
-                if ((closest == -1 || dist < closestDist) && c.framesTracked > 3)
+                dx = c.pos3D[0] - x;
+                dy = c.pos3D[1] - y;
+                dist = dx * dx + dy * dy;
+                if ((closest == -1 || dist < closestDist) && c.framesTracked > 3 && i < 3)
                 {
                     closestDist = dist;
                     closest = i;
@@ -230,9 +239,10 @@ int main(int argc, char* argv[])
                 }
                 else
                 {
-                    if (framesWithoutMovement > 5 && coins[0].framesTracked > 3 && coins[1].framesTracked > 3)
+                    if (framesWithoutMovement > 5 && coins[2].framesTracked > 3)
                     {
                         ballMoving = false;
+                        detectedGoalThisTurn = false;
                         ball = closest;
                     }
                     else
@@ -253,7 +263,7 @@ int main(int argc, char* argv[])
                                     float dx = coins[i].pos2D[0] - lastBallPosition[0];
                                     float dy = coins[i].pos2D[1] - lastBallPosition[1];
                                     float dist = dx * dx + dy * dy;
-                                    if ((closest == -1 || dist < closestDist) && dist < coinTracker.coinSize * coinTracker.coinSize * 3 * 3)
+                                    if ((closest == -1 || dist < closestDist) && dist < coinTracker.coinSize * coinTracker.coinSize * 8 * 8)
                                     {
                                         closestDist = dist;
                                         closest = i;
@@ -280,21 +290,39 @@ int main(int argc, char* argv[])
                     const Vec2f& pos1 = coins[0].pos2D;
                     const Vec2f& pos2 = coins[1].pos2D;
 
-                    if (ballMoving)
+                    if (ballMoving && !detectedGoalThisTurn)
                     {
                         float lastDist = (pos2[1] - lastBallPosition[1]) * (pos2[0] - pos1[0]) - (pos2[0] - lastBallPosition[0]) * (pos2[1] - pos1[1]);
                         float dist = (pos2[1] - ballPos[1]) * (pos2[0] - pos1[0]) - (pos2[0] - ballPos[0]) * (pos2[1] - pos1[1]);
 
+                        float dx = pos1[0] - pos2[0]; float dy = pos1[1] - pos2[1];
+                        float proj = ((ballPos[0] - pos1[0]) * (pos2[0] - pos1[0]) + (ballPos[1] - pos1[1]) * (pos2[1] - pos1[1])) / (dx * dx + dy * dy);
+
                         if (signbit(lastDist) != signbit(dist))
                         {
-                            cout << "Goal" << "\n";
+                            bool betweenFlags = proj > 0 && proj < 1;
+
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || defined(_WIN64)
-							PlaySound(TEXT("goal.wav"), NULL, SND_FILENAME | SND_ASYNC);
+							PlaySound(TEXT(betweenFlags ? "goal.wav" : "goalMissed.wav"), NULL, SND_FILENAME | SND_ASYNC);
 #endif
-							goals++;
+                            detectedGoalThisTurn = true;
+                            if (betweenFlags)
+                            {
+                                cout << "Goal" << "\n";
+
+                                goals++;
+                                lastGoal = glfwGetTime();
+                                goalFxSystem.emit(coins[0].pos3D, coins[1].pos3D, 20, 0);
+                            }
+                            else
+                            {
+                                cout << "Goal missed..." << "\n";
+                                goals--;
+                            }
+
                             Point start(cvRound(pos1[0] / downscale), cvRound(pos1[1] / downscale));
                             Point end(cvRound(pos2[0] / downscale), cvRound(pos2[1] / downscale));
-                            line(img_background2, start, end, Scalar(0, 0, 255), 5);
+                            line(img_background2, start, end, betweenFlags ? Scalar(0, 255, 0) : Scalar(0, 0, 255), 5);
                         }
                     }
 
@@ -308,12 +336,21 @@ int main(int argc, char* argv[])
 
                 framesWithoutMovement = 0;
             }
+
+            if (ballMoving && !prevBallMoving)
+            {
+                coinMoveStartPos[0] = (lastBallPosition[0] - img_background.cols * downscale * 0.5) * scale;
+                coinMoveStartPos[1] = (img_background.rows * downscale * 0.5 - lastBallPosition[1]) * scale;
+                coinMoveStartPos[2] = smoothedZ;
+            }
+
+            /*
             if (ballMoving)
             {
                 Point start(100, 100);
                 Point end(100, 200);
                 line(img_background2, start, end, Scalar(0, 0, 255), 5);
-            }
+            }*/
         }
         else 
         {
@@ -441,7 +478,7 @@ void initGL(int argc, char* argv[])
 
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    glOrtho(-0.25, 0.25, -0.25, 0.25, 1, 1.5);
+    glOrtho(-0.3, 0.3, -0.3, 0.3, 1, 1.5);
     glGetFloatv(GL_MODELVIEW_MATRIX, lightProjectionMatrix);
 
     glLoadIdentity();
@@ -507,14 +544,15 @@ void initGL(int argc, char* argv[])
     circleTex.init();
     noMarkerTex.init();
     noTrackingTex.init();
+    goalTex.init();
 
     float time = glfwGetTime();
     uiSystem.pos = cv::Vec3f(0, 0.25, 0);
     uiSystem.emitPerSecond = 15;
     uiSystem.minEmitRad = 0.4;
     uiSystem.maxEmitRad = 0.6;
-    uiSystem.minRadVel = 0.25;
-    uiSystem.maxRadVel = 0.5;
+    uiSystem.minRadVel = 0.5;
+    uiSystem.maxRadVel = 0.75;
     uiSystem.fadeTime = 1;
     uiSystem.minLifeTime = 1;
     uiSystem.maxLifeTime = 2;
@@ -543,6 +581,24 @@ void initGL(int argc, char* argv[])
     ballFxSystem.startColor1 = ballFxSystem.endColor1 = Vec4f(0.5, 0.5, 0.5, 0.2F);
     ballFxSystem.startColor2 = ballFxSystem.endColor2 = Vec4f(1, 1, 1, 0.4F);
     ballFxSystem.init(time);
+
+    goalFxSystem.emitPerSecond = 0;
+    goalFxSystem.minEmitRad = goalFxSystem.maxEmitRad = 0;
+    goalFxSystem.minRadVel = 0.025;
+    goalFxSystem.maxRadVel = 0.05;
+    goalFxSystem.fadeTime = 0.25;
+    goalFxSystem.minLifeTime = 1;
+    goalFxSystem.maxLifeTime = 2;
+    goalFxSystem.minRotVelocity = -180;
+    goalFxSystem.maxRotVelocity = 180;
+    goalFxSystem.minVel = Vec3f(0, 0, 0.01F);
+    goalFxSystem.maxVel = Vec3f(0, 0, 0.015F);
+    goalFxSystem.minStartSize = 0.001;
+    goalFxSystem.maxStartSize = 0.004;
+    goalFxSystem.minEndSize = goalFxSystem.maxEndSize = 0;
+    goalFxSystem.startColor1 = goalFxSystem.endColor1 = Vec4f(0, 1, 0, 0.8F);
+    goalFxSystem.startColor2 = goalFxSystem.endColor2 = Vec4f(1, 1, 0, 0.4F);
+    goalFxSystem.init(time);
 
     int error = glGetError();
     if (error)
@@ -873,19 +929,17 @@ void drawScene(float* markerMatrix, vector<Coin>& coins, bool ball, bool marker,
     // Soccer ball
     if (ball && coins.size() >= 3)
     {
-        const Vec3f& v1 = coins[2].pos3D;
+        const Vec3f& v = coins[2].pos3D;
+        const Vec3f& v1 = ballMoving ? coinMoveStartPos : v;
         const Vec3f& v2 = (coins[0].pos3D + coins[1].pos3D) * 0.5;
-
-        float dx = v2[0] - v1[0];
-        float dy = v2[1] - v1[1];
 
         glPushMatrix();
         glColor4f(1.0, 1.0, 1.0, 1.0);
 
-        glTranslatef(v1[0], v1[1], v1[2]);
+        glTranslatef(v[0], v[1], v[2]);
         glScalef(0.005F, 0.005F, 0.005F);
         glTranslatef(0, 0, 2.4F);
-        glRotatef(time * 5 * 10, -(v2[1] - v1[1]), v2[0] - v1[0], 0);
+        glRotatef(time * (ballMoving ? 180 : 60), -(v2[1] - v1[1]), v2[0] - v1[0], 0);
         glTranslatef(0, 0, -2.4F);
 
         glRotatef(90, 1, 0, 0);
@@ -939,7 +993,7 @@ void drawOverlays(float* markerMatrix, vector<Coin>& coins, bool ball, bool mark
     }
 
     // Arrow below ball 
-    if (ball)
+    if (ball && !ballMoving)
     {
         const Vec3f& v1 = coins[2].pos3D;
         const Vec3f& v2 = (coins[0].pos3D + coins[1].pos3D) * 0.5;
@@ -970,9 +1024,12 @@ void drawOverlays(float* markerMatrix, vector<Coin>& coins, bool ball, bool mark
 
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+    ballFxSystem.emitting = ballMoving;
     if (ball)
         ballFxSystem.moveToPos(coins[2].pos3D, time);
     ballFxSystem.draw(time);
+
+    goalFxSystem.draw(time);
 }
 
 void drawUI(float time)
@@ -982,6 +1039,8 @@ void drawUI(float time)
     float ratio = windowWidth / (float)windowHeight;
     float backgroundOffset = 0.5F - 0.5F * cameraWidth * windowHeight / cameraHeight / windowWidth;  // Center camera image in window
     float t = min(1, (time - lastGameStateChange) / 0.5);
+    float goalAnim = min(1.0f, (time - lastGoal) / 0.75F);
+
     t = gameState == GameState::TITLE ? 1 : gameState == GameState::VICTORY ? t : framesWithoutCoins > 15 ? 1 : 1 - t;
     if (t > 0.01)
     {
@@ -1090,7 +1149,14 @@ void drawUI(float time)
             noTrackingTex.drawQuad(0, 0, 0.25f);
         }
 		
-		if (goals > 0) 
+        if (goalAnim < 1)
+        {
+            glColor4f(1.0, 1.0, 1.0, sin(goalAnim * M_PI));
+            float t = 1 - min(1, goalAnim * 2);
+            goalTex.drawQuad(0, 0.25, 0.15 + 0.05 * (1 - t * t));
+        }
+
+		//if (goals > 0) 
         {
 			glColor4f(1, 0, 0, 1);
 			glRasterPos2f(-ratio + 0.2F, 0.8F);
@@ -1098,11 +1164,11 @@ void drawUI(float time)
 			scoreText += std::to_string(goals);
 			const unsigned char* score = reinterpret_cast<const unsigned char*>(scoreText.c_str());
 
-			glutBitmapString(GLUT_BITMAP_TIMES_ROMAN_24, score);
+            glutBitmapString(GLUT_BITMAP_TIMES_ROMAN_24, score);
 		}
     }
 
-    uiSystem.emitting = gameState == GameState::VICTORY;
+    uiSystem.emitting = gameState == GameState::VICTORY || goalAnim < 0.5;
     uiSystem.draw(time);
 
     if (framesWithoutMarker > 15)
@@ -1187,6 +1253,7 @@ void onKey(GLFWwindow* window, int key, int scancode, int action, int mods)
         {
             lastGameStateChange = glfwGetTime();
             gameState = GameState::TITLE;
+            goals = 0;
         }
     }
 }

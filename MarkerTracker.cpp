@@ -11,6 +11,7 @@
 #include "MarkerTracker.h"
 #include "PoseEstimation.h"
 
+//#define OPENCV_WINDOWS
 
 void trackbarHandler( int pos, void* slider_value ) {
 	*( (int*)slider_value ) = pos;
@@ -43,19 +44,21 @@ int subpixSampleSafe ( const cv::Mat &pSrc, const cv::Point2f &p )
 void MarkerTracker::init()
 {
 	std::cout << "Startup\n";
+#ifdef OPENCV_WINDOWS
 	cv::namedWindow(kWinName1, CV_WINDOW_NORMAL);
-    cv::namedWindow(kWinName2, CV_WINDOW_AUTOSIZE);
+	cv::namedWindow(kWinName2, CV_WINDOW_AUTOSIZE);
 	cv::namedWindow(kWinName3, CV_WINDOW_AUTOSIZE);
-	cv::namedWindow(kWinName4, 0 );
-	cvResizeWindow("Marker", 120, 120 );
+	cv::namedWindow(kWinName4, 0);
+	cvResizeWindow("Marker", 120, 120);
 
 	cvResizeWindow(kWinName1.c_str(), 1024, 768);
 
 	int max = 255;
-	cv::createTrackbar( "Threshold", kWinName2, &thresh, max, trackbarHandler, &thresh);
+	cv::createTrackbar("Threshold", kWinName2, &thresh, max, trackbarHandler, &thresh);
 
-	cv::createTrackbar( "BW Threshold", kWinName2, &bw_thresh, max, bw_trackbarHandler, &bw_thresh);
-	
+	cv::createTrackbar("BW Threshold", kWinName2, &bw_thresh, max, bw_trackbarHandler, &bw_thresh);
+#endif 
+
 	memStorage = cvCreateMemStorage();
 }
 
@@ -63,10 +66,12 @@ void MarkerTracker::cleanup()
 {
 	cvReleaseMemStorage (&memStorage);
 
+#ifdef OPENCV_WINDOWS
 	cv::destroyWindow (kWinName1);
 	cv::destroyWindow (kWinName2);
 	cv::destroyWindow (kWinName3);
 	cv::destroyWindow (kWinName4);
+#endif
 	std::cout << "Finished\n";
 }
 
@@ -257,7 +262,9 @@ bool MarkerTracker::findMarker( cv::Mat &img_bgr, float resultMatrix[16] )
 					{
 						cv::Mat iplTmp;
 						cv::resize( iplStripe, iplTmp, cv::Size(100,300) );
+#ifdef OPENCV_WINDOWS
 						cv::imshow ( kWinName3, iplTmp );//iplStripe );
+#endif
 						isFirstStripe = false;
 					}
 
@@ -417,7 +424,9 @@ bool MarkerTracker::findMarker( cv::Mat &img_bgr, float resultMatrix[16] )
 
 			if ( isFirstMarker )
 			{
+#ifdef OPENCV_WINDOWS
 				cv::imshow ( kWinName4, iplMarker );
+#endif
 				isFirstMarker = false;
 			}
 
@@ -459,8 +468,10 @@ bool MarkerTracker::findMarker( cv::Mat &img_bgr, float resultMatrix[16] )
 			*/
 		} // end of loop over contours
 
+#ifdef OPENCV_WINDOWS
 		cv::imshow(kWinName1, img_bgr);
 		cv::imshow(kWinName2, img_mono);
+#endif
 
 		isFirstStripe = true;
 		isFirstMarker = true;
