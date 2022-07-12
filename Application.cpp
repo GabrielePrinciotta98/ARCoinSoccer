@@ -1038,9 +1038,8 @@ void drawUI(float time)
 
     float ratio = windowWidth / (float)windowHeight;
     float backgroundOffset = 0.5F - 0.5F * cameraWidth * windowHeight / cameraHeight / windowWidth;  // Center camera image in window
-    float t = min(1, (time - lastGameStateChange) / 0.5);
     float goalAnim = min(1.0f, (time - lastGoal) / 0.75F);
-
+    float t = min(1.0, (time - lastGameStateChange) / 0.5);
     t = gameState == GameState::TITLE ? 1 : gameState == GameState::VICTORY ? t : framesWithoutCoins > 15 ? 1 : 1 - t;
     if (t > 0.01)
     {

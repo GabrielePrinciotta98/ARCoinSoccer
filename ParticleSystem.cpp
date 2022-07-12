@@ -1,5 +1,6 @@
 #include "ParticleSystem.h"
 #include <iostream>
+#include <ctime>
 
 void ParticleSystem::init(float time)
 {
