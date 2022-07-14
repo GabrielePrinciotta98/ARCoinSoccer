@@ -5,7 +5,8 @@
 class Texture
 {
 public:
-	Texture(std::string file) : file(file) { }
+	Texture(std::string file) : file(file), wrappingRepeat(false) { }
+	Texture(std::string file, bool repeats) : file(file), wrappingRepeat(repeats) { }
 
 	void init();
 	void bind();
@@ -19,7 +20,8 @@ protected:
 	GLuint texture = 0;
 	std::string file;
 	unsigned int width = 1, height = 1;
-	bool initialized;
+	bool initialized = false;
+	bool wrappingRepeat;
 };
 
 class ObjModel
@@ -37,6 +39,6 @@ protected:
 	std::string objFile;
 	GLuint callList;
 	Texture texture;
-	bool initialized;
-	std::vector<cv::Vec4f> colors;
+	bool initialized = false;
+	std::vector<cv::Vec4f> colors{};
 };

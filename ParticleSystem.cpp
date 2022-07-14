@@ -2,6 +2,8 @@
 #include <iostream>
 #include <ctime>
 
+// Some really basic particle effects
+
 void ParticleSystem::init(float time)
 {
 	std::srand(std::time(nullptr));

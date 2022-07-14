@@ -7,6 +7,7 @@
 #include <iostream>
 #include <map>
 
+// Load png files as textures
 void Texture::init()
 {
     std::vector<unsigned char> image;
@@ -28,8 +29,8 @@ void Texture::init()
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8_SNORM, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, &image[0]);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrappingRepeat ? GL_REPEAT : GL_CLAMP);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrappingRepeat ? GL_REPEAT : GL_CLAMP);
         glGenerateMipmap(GL_TEXTURE_2D);
     }
     initialized = true;
@@ -46,11 +47,13 @@ void Texture::bind()
         glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+// Draw simple 2d quad facing z, preserving the ratio
 void Texture::drawQuad(float x, float y, float height)
 {
     drawQuad(x, y, height * getWidth() / getHeight(), height);
 }
 
+// Draw simple 2d quad facing z
 void Texture::drawQuad(float x, float y, float width, float height)
 {
     glEnable(GL_TEXTURE_2D);
@@ -73,6 +76,7 @@ bool Texture::valid()
     return !file.empty();
 }
 
+// Load 3d .obj models
 void ObjModel::init()
 {
     texture.init();

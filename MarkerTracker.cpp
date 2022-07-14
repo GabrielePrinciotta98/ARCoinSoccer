@@ -21,7 +21,6 @@ void bw_trackbarHandler(int pos, void* slider_value ) {
 	*( (int*)slider_value ) = pos;
 }
 
-
 int subpixSampleSafe ( const cv::Mat &pSrc, const cv::Point2f &p )
 {
 	int x = int( floorf ( p.x ) );

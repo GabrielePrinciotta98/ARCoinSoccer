@@ -10,6 +10,7 @@
 #include "ObjLoader.h"
 #include "ParticleSystem.h"
 
+// Windows libraries for sound effects
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || defined(_WIN64)
 #include <windows.h>
 #include <mmsystem.h>
@@ -20,7 +21,10 @@
 #define FREEGLUT_STATIC
 #define _LIB
 #define FREEGLUT_LIB_PRAGMAS 0
-//#define CAMERA
+
+//#define CALIBRATION_HINT // Show a quad on the marker to adjust fov
+//#define CAMERA 1 // Use camera
+#define VIDEO 1 // If camera is disabled, use specified video
 
 using namespace cv;
 using namespace std;
@@ -37,37 +41,75 @@ void drawUI(float time);
 
 void display(GLFWwindow* window, Mat &img_background, float* markerMatrix, vector<Coin>& coins, bool ball, bool marker);
 
+// Tracker parameters for our test videos...
+
 #ifdef CAMERA
-const double fov = 60;
-const double downscale = 0.5;
-#else
-const double fov = 65;
-const double downscale = 0.25;
+double fov = 40;
+double downscale = 0.5;
+CoinTracker coinTracker(10, 10, 10, 40.0, 30.0);
+
+#elif VIDEO == 0
+std::string videoFile = "CoinSoccerMovie.mp4";
+double fov = 63;
+double downscale = 0.25;
+CoinTracker coinTracker(6, 40.0, 30.0);
+
+#elif VIDEO == 1
+std::string videoFile = "CoinSoccerMovie2.mp4";
+double fov = 80;
+double downscale = 1.0 / 3;
+CoinTracker coinTracker(12, 12, 15, 40.0, 30.0);
+
+#elif VIDEO == 2
+std::string videoFile = "CoinSoccerMovie3.mp4";
+double fov = 59;
+double downscale = 0.5;
+CoinTracker coinTracker(6, 6, 11, 28.0, 28.0);
+
+#elif VIDEO == 3
+std::string videoFile = "CoinSoccerMovie4.mp4";
+double fov = 81;
+double downscale = 0.5;
+CoinTracker coinTracker(9, 9, 15, 40.0, 30.0);
+
+#elif VIDEO == 4
+std::string videoFile = "CoinSoccerMovie5.mp4";
+double fov = 59;
+double downscale = 0.5;
+CoinTracker coinTracker(9, 9, 15, 40.0, 30.0);
 #endif
 
 int cameraWidth, cameraHeight;
 int windowWidth, windowHeight;
 int savedWWidth, savedWHeight, savedWPosX, savedWPosY;
+double prevFov = fov;
 
+// OpenGL shadow-mapping stuff
+const bool shadowMapping = true;
 const GLsizei shadowMapSize = 1024;
 GLuint shadowMapTexture, shadowFrameBuffer;
-const bool shadowMapping = true;
 float lightProjectionMatrix[16], lightViewMatrix[16], textureMatrix[16];
 float cameraProjectionMatrix[16], cameraViewMatrix[16];
-float smoothedZ = 100;
-int goals = 0;
+
+float smoothedZ = 100; // z-value at which 3d-overdraws are drawn (smoothed over time)
+int goals = 0; // score
+
+// 3d-models and textures
 GLuint vignetteTexture;
 ObjModel soccerModel("soccer_ball.obj", "soccer_ball_diffuse.png"), 
 shoeModel("football_boots.obj", { Vec4f(1, 1, 1, 1), Vec4f(0.2, 0.2, 0.2, 1), Vec4f(1, 1, 1, 1), Vec4f(0.8, 0.8, 0.8, 1), Vec4f(0.2, 0.2, 0.2, 1), Vec4f(0, 0, 0, 1) }),
 coinModel("coin.obj", { Vec4f(1.0, 0.75, 0.3, 1.0), Vec4f(0.8, 0.8, 0.8, 1.0) });
-Texture titleTex("title.png"), creditTex("credits.png"), anyKeyTex("anykey.png"), moveCoinTex("moveCoins.png"), noMarkerTex("noMarker.png"), noTrackingTex("noTracking.png"), winTex("victory.png"), circleTex("circle.png"), goalTex("goal.png");
+Texture titleTex("title.png"), creditTex("credits.png"), anyKeyTex("anykey.png"), moveCoinTex("moveCoins.png"), noMarkerTex("noMarker.png"), noTrackingTex("noTracking.png"), winTex("victory.png"), circleTex("circle.png"), goalTex("goal.png"), stripeTex("stripe.png", true);
 ParticleSystem uiSystem(""), ballFxSystem("Cloud.png"), goalFxSystem("");
 
+// Starting positions of coins on title-screen
 const bool startPos = true;
-Vec3f startPositions[] = { Vec3f(0, -0.5f, 0), Vec3f(-0.2f, -0.25f, 0), Vec3f(0.3f, -0.3f, 0) };
+Vec3f startPositions[] = { Vec3f(0, -0.5f, 0), Vec3f(-0.15f, -0.25f, 0), Vec3f(0.3f, -0.3f, 0) };
+
+const Vec2f targetAreaMin(-0.5, 0.65), targetAreaMax(0.5, 0.9);
+const int goalsUntilFinalArea = 3;
 
 bool fullscreen = false;
-
 int framesWithoutMarker = 100;
 int framesWithoutCoins  = 100;
 
@@ -78,21 +120,59 @@ enum class GameState
     VICTORY
 };
 
-GameState gameState = GameState::GAME;
-float lastGameStateChange;
+GameState gameState = GameState::TITLE;
+float lastGameStateChange; // For animation
 
 bool ballMoving;
 Vec3f coinMoveStartPos;
-float lastGoal = -100;
+float lastGoal = -100; // For animation
+
+float sqDist(Vec2f pos1, Vec2f pos2)
+{
+    float dx = pos1[0] - pos2[0];
+    float dy = pos1[1] - pos2[1];
+    return dx * dx + dy * dy;
+}
+
+// Used for tracking
+int findNewCoinClosestTo(std::vector<Coin> &coins, Vec2f lastPosition, float maxDist)
+{
+    float closestDist = 0;
+    int closest = -1;
+    for (int i = 0; i < coins.size(); ++i)
+    {
+        if (coins[i].framesTracked == 0) // coin found in this frame
+        {
+            // Close to last position (where we lost tracking)
+            float dist = sqDist(coins[i].pos2D, lastPosition);
+            if ((closest == -1 || dist < closestDist) && dist < maxDist)
+            {
+                closestDist = dist;
+                closest = i;
+            }
+        }
+    }
+    return closest;
+}
+
+// Used for detecting goals
+bool lineSegmentIntersection(Vec2f p0, Vec2f p1, Vec2f p2, Vec2f p3)
+{
+    Vec2f s1 = p1 - p0;
+    Vec2f s2 = p3 - p2;
+    float s = (-s1[1] * (p0[0] - p2[0]) + s1[0] * (p0[1] - p2[1])) / (-s2[0] * s1[1] + s1[0] * s2[1]);
+    float t = (s2[0] * (p0[1] - p2[1]) - s2[1] * (p0[0] - p2[0])) / (-s2[0] * s1[1] + s1[0] * s2[1]);
+
+    return s >= 0 && s <= 1 && t >= 0 && t <= 1;
+}
 
 int main(int argc, char* argv[])
 {
     //Set up OpenCV
 #ifdef CAMERA
-    //cv::VideoCapture cap(1);
-    cv::VideoCapture cap("CoinSoccerMovie4.mp4");
+    cv::VideoCapture cap(1);
 #else
-    cv::VideoCapture cap("CoinSoccerMovie.mp4");
+    cv::VideoCapture cap(videoFile);
 #endif
 
     if (!cap.isOpened())
@@ -101,13 +181,17 @@ int main(int argc, char* argv[])
         return -1;
     }
 
+    // Setup GLFW
     GLFWwindow* window;
 
     if (!glfwInit())
         return -1;
+
+    // Setup GLUT
     glutInit(&argc, argv);
-    glfwWindowHint(GLFW_SRGB_CAPABLE, GLFW_TRUE);
-    glfwWindowHint(GLFW_SAMPLES, 8);
+
+    glfwWindowHint(GLFW_SRGB_CAPABLE, GLFW_TRUE);  // Map between sRGB and Linear-space for better lighting
+    glfwWindowHint(GLFW_SAMPLES, 8); // Anti-aliasing
    //glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
     cameraWidth = cap.get(CAP_PROP_FRAME_WIDTH);
     cameraHeight = cap.get(CAP_PROP_FRAME_HEIGHT);
@@ -123,6 +207,7 @@ int main(int argc, char* argv[])
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
 
+    // Setup GLEW
     if (glewInit() != GLEW_OK)
     {
         glfwTerminate();
@@ -132,27 +217,36 @@ int main(int argc, char* argv[])
     int width, height;
     glfwGetFramebufferSize(window, &width, &height);
     reshape(window, width, height);
-
-    initGL(argc, argv);
+    initGL(argc, argv); // Main init
 
     const double kMarkerSize = 0.045;
     MarkerTracker markerTracker(kMarkerSize, 120, 120);
-#ifdef CAMERA
-    CoinTracker coinTracker(11 * downscale, 50.0, 30.0);
-#else
-    CoinTracker coinTracker(24 * downscale, 40.0, 30.0);
-#endif
+    coinTracker.init();
+
+    // Coin detection
     std::vector<Coin> lastCoins;
     std::vector<Coin> coins;
+    // Game logic
     cv::Vec2f lastBallPosition(0, 0);
+    // Only valid while coin is moving
+    cv::Vec2f flag1Position(0, 0);
+    cv::Vec2f flag2Position(0, 0);
+
     int framesWithoutMovement = 60;
+    int framesWithoutFlags = 0;
+    int framesBallMoving = 0;
+    int framesWithoutBall = 0;
     bool detectedGoalThisTurn = false;
-    size_t ballID = -1;
+    size_t ballID = -1, flag1Id = -1, flag2Id = -1;
 
     cv::Mat img_background, img_background_resized, img_background2;
     float resultMatrix[16];
     while (!glfwWindowShouldClose(window))
     {
+        // Live update for slider
+        if (fov != prevFov)
+            reshape(window, windowWidth, windowHeight);
+
         if (!cap.read(img_background))
         {
             cap.set(CAP_PROP_POS_FRAMES, 0); // Loop back to frame 0
@@ -163,6 +257,7 @@ int main(int argc, char* argv[])
         img_background2 = img_background.clone();
         lastCoins = coins;
 
+        // Downscale the image before looking for coins for better quality/performance 
         cv::resize(img_background, img_background_resized, Size(), downscale, downscale, CV_INTER_LINEAR);
         coinTracker.findCoins(img_background_resized, lastCoins, coins);
         bool marker = markerTracker.findMarker(img_background, resultMatrix);
@@ -175,14 +270,16 @@ int main(int argc, char* argv[])
         // xyz Position from last markerMatrix
         double x = resultMatrix[3];
         double y = resultMatrix[7];
-        double z = resultMatrix[11];
+        double z = resultMatrix[11] - 0.01;
         smoothedZ = abs(smoothedZ - z) > 1 ? z : smoothedZ * 0.9 + z * 0.1;
         // For mapping 2d pixel coordinates to 3d coordinates, adjust for (downscaled) resolution and perspective
         double scale = 2.0 * tan(fov / 180.0 * M_PI * 0.5) * (-smoothedZ) / ((double)img_background.rows * downscale);
 
+        // We're only looking for 3 coins, 2 flags + ball
         if (!ballMoving && coins.size() > 3)
             coins.resize(3);
 
+        // Map 2d-pixel coordinates for each coin to 3d
         for (int i = 0; i < coins.size(); ++i)
         {
             Coin& c = coins[i];
@@ -193,8 +290,10 @@ int main(int argc, char* argv[])
 
         int ball = -1;
 
+        // Game logic for detecting goals
         if (gameState == GameState::GAME)
         {
+            // 
             bool prevBallMoving = ballMoving;
 
             float closestDist = 0;
@@ -202,161 +301,282 @@ int main(int argc, char* argv[])
             float fastestVel = 0;
             int fastest = -1;
 
-            if (!ballMoving && coins.size() > 3)
-                coins.resize(3);
+            int flag1 = -1, flag2 = -1;
 
+            // Find the fastest moving coin, and the coin closest to the marker position
             for (int i = 0; i < coins.size(); ++i)
             {
                 Coin& c = coins[i];
 
                 float vel = c.vel[2];
-                float dx = lastBallPosition[0] - c.pos2D[0];
-                float dy = lastBallPosition[1] - c.pos2D[1];
-                float dist = dx * dx + dy * dy;
-				if ((fastest == -1 || fastestVel < vel) && (!ballMoving || dist < coinTracker.coinSize * coinTracker.coinSize * 12 * 12 && i > 1))
+                float dist = sqDist(lastBallPosition, c.pos2D);
+                // For a bit better tracking of the ball, exclude far away coins and flags
+                bool plausibleCandidate = (!ballMoving || dist < coinTracker.coinSize * coinTracker.coinSize * 12 * 12 && c.id != flag1Id && c.id != flag2Id);
+				if ((fastest == -1 || fastestVel < vel) && plausibleCandidate)
                 {
                     fastestVel = vel;
                     fastest = i;
                 }
 
-                dx = c.pos3D[0] - x;
-                dy = c.pos3D[1] - y;
+                float dx = c.pos3D[0] - x;
+                float dy = c.pos3D[1] - y;
                 dist = dx * dx + dy * dy;
                 if ((closest == -1 || dist < closestDist) && c.framesTracked > 3 && i < 3)
                 {
                     closestDist = dist;
                     closest = i;
                 }
+
+                // Track ball and flags by id (only while ball is moving)
+                if (c.id == ballID)
+                    ball = i;
+                else if (c.id == flag1Id)
+                    flag1 = i;
+                else if (c.id == flag2Id)
+                    flag2 = i;
             }
 
+            // We got enough coins for 2 flags and a ball
             if (coins.size() >= 3)
             {
-                if (fastestVel > 6)
+                if (ballMoving)
                 {
-                    ball = fastest;
-                    framesWithoutMovement = 0;
-                    ballMoving = true;
-                }
-                else
-                {
-                    if (framesWithoutMovement > 5 && coins[2].framesTracked > 3)
+                    framesBallMoving++;
+
+                    // If we lost track of the flags, try to find some coin close to their original position
+                    if (flag1 == -1)
                     {
-                        ballMoving = false;
-                        detectedGoalThisTurn = false;
-                        ball = closest;
+                        flag1Id = -1;
+                        flag1 = findNewCoinClosestTo(coins, flag1Position, coinTracker.coinSize * coinTracker.coinSize);
+                    }
+                    if (flag2 == -1)
+                    {
+                        flag2Id = -1;
+                        flag2 = findNewCoinClosestTo(coins, flag2Position, coinTracker.coinSize * coinTracker.coinSize);
+                    }
+
+                    if (flag1 == -1 || flag2 == -1)
+                    {
+                        // Tracking lost
+                        if (framesWithoutFlags++ > 5)
+                            ballMoving = false;
                     }
                     else
                     {
-                        if (coins[2].id == ballID)
-                            ball = 2;
-                        else if (coins[1].id == ballID)
-                            ball = 1;
-                        else if (coins[0].id == ballID)
-                            ball = 0;
-                        else
+                        flag1Id = coins[flag1].id;
+                        flag2Id = coins[flag2].id;
+                        framesWithoutFlags = 0;
+
+                        if (ball == -1)
                         {
-                            closest = -1;
-                            for (int i = 0; i < coins.size(); ++i)
+                            // We have lost track of the ball, 
+                            // look for fastest coin,
+                            // coin reasonably close to the last tracked position or 
+                            // in the worst case just some coin that has been tracked stably for a few frames
+                            if (fastestVel > 20)
+                                ball = fastest;
+                            else
+                                ball = findNewCoinClosestTo(coins, lastBallPosition, coinTracker.coinSize * coinTracker.coinSize * 12 * 12);
+                            
+                            if (ball == -1 && framesWithoutBall > 5 && coins[2].framesTracked > 3)
+                                ball = 2;
+
+                            if (ball != -1)
                             {
-                                if (coins[i].framesTracked == 0)
-                                {
-                                    float dx = coins[i].pos2D[0] - lastBallPosition[0];
-                                    float dy = coins[i].pos2D[1] - lastBallPosition[1];
-                                    float dist = dx * dx + dy * dy;
-                                    if ((closest == -1 || dist < closestDist) && dist < coinTracker.coinSize * coinTracker.coinSize * 8 * 8)
-                                    {
-                                        closestDist = dist;
-                                        closest = i;
-                                    }
-                                }
+                                framesWithoutBall = 0;
+                                framesWithoutMovement = 0;
                             }
-                            ball = closest;
-                            ballMoving = true;
+                            else
+                                framesWithoutBall++;
                         }
+
+                        // If the ball is very close to one of the flag positions, this is probably a mistake
+                        if (ball != -1 && (sqDist(coins[ball].pos2D, flag1Position) < coinTracker.coinSize * coinTracker.coinSize * 0.25
+                            || sqDist(coins[ball].pos2D, flag2Position) < coinTracker.coinSize * coinTracker.coinSize * 0.25))
+                        {
+                            ball = -1;
+                            ballID = (size_t) -1;
+                            std::cout << "Ball at flag position\n";
+                        }
+
+                        if (fastestVel <= 20 && ball != -1)
+                            framesWithoutMovement++;
                     }
 
-                    framesWithoutMovement++;
+                    // Nothing seems to be moving anymore
+                    if (framesWithoutMovement > 5)
+                        ballMoving = false;
+                    // Timeout
+                    if (framesWithoutBall > 15)
+                        ballMoving = false;
+                }
+                else
+                {
+                    // One of the coins has started moving
+                    if (fastestVel > 20)
+                    {
+                        ball = fastest;
+                        lastBallPosition = Vec2f(coins[ball].pos2D[0] - coins[ball].vel[0], coins[ball].pos2D[1] - coins[ball].vel[1]);
+                        ballMoving = true;
+                    }
+                    // We have lost track of the ball... maybe it started moving?
+                    else if (ball == -1)
+                    {
+                        ball = findNewCoinClosestTo(coins, lastBallPosition, coinTracker.coinSize * coinTracker.coinSize);
+                        if (ball != -1 || coins[1].framesTracked > 3 && coins[2].framesTracked == 0)
+                            ballMoving = true;
+                    }
+                }
+
+                // Nothing is moving, ball is the coin closest to the marker 
+                if (!ballMoving)
+                    ball = closest;
+
+                // Ensure the coin with the ball is always at coins[2], flags at index 0 and 1 (for convenience)
+                if (flag1 != -1 && flag1 != 0)
+                {
+                    swap(coins[0], coins[flag1]);
+                    if (ball == 0)
+                        ball = flag1;
+                    if (flag2 == 0)
+                        flag2 = flag1;
+                    flag1 = 0;
+                }
+                if (flag2 != -1 && flag2 != 1)
+                {
+                    swap(coins[1], coins[flag2]);
+                    if (ball == 1)
+                        ball = flag2;
+                    flag2 = 1;
                 }
                 if (ball != -1 && ball != 2)
                 {
                     swap(coins[2], coins[ball]);
                     ball = 2;
                 }
-
-                if (ball != -1)
-                {
-                    ballID = coins[ball].id;
-                    const Vec2f& ballPos = coins[ball].pos2D;
-                    const Vec2f& pos1 = coins[0].pos2D;
-                    const Vec2f& pos2 = coins[1].pos2D;
-
-                    if (ballMoving && !detectedGoalThisTurn)
-                    {
-                        float lastDist = (pos2[1] - lastBallPosition[1]) * (pos2[0] - pos1[0]) - (pos2[0] - lastBallPosition[0]) * (pos2[1] - pos1[1]);
-                        float dist = (pos2[1] - ballPos[1]) * (pos2[0] - pos1[0]) - (pos2[0] - ballPos[0]) * (pos2[1] - pos1[1]);
-
-                        float dx = pos1[0] - pos2[0]; float dy = pos1[1] - pos2[1];
-                        float proj = ((ballPos[0] - pos1[0]) * (pos2[0] - pos1[0]) + (ballPos[1] - pos1[1]) * (pos2[1] - pos1[1])) / (dx * dx + dy * dy);
-
-                        if (signbit(lastDist) != signbit(dist))
-                        {
-                            bool betweenFlags = proj > 0 && proj < 1;
-
-#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || defined(_WIN64)
-							PlaySound(TEXT(betweenFlags ? "goal.wav" : "goalMissed.wav"), NULL, SND_FILENAME | SND_ASYNC);
-#endif
-                            detectedGoalThisTurn = true;
-                            if (betweenFlags)
-                            {
-                                cout << "Goal" << "\n";
-
-                                goals++;
-                                lastGoal = glfwGetTime();
-                                goalFxSystem.emit(coins[0].pos3D, coins[1].pos3D, 20, 0);
-                            }
-                            else
-                            {
-                                cout << "Goal missed..." << "\n";
-                                goals--;
-                            }
-
-                            Point start(cvRound(pos1[0] / downscale), cvRound(pos1[1] / downscale));
-                            Point end(cvRound(pos2[0] / downscale), cvRound(pos2[1] / downscale));
-                            line(img_background2, start, end, betweenFlags ? Scalar(0, 255, 0) : Scalar(0, 0, 255), 5);
-                        }
-                    }
-
-                    lastBallPosition = ballPos;
-                }
             }
-            else
+            // We have less than 3 coins detected
+            else 
             {
-                if (coins.size() == 2 && coins[0].framesTracked > 3 && coins[1].framesTracked > 3)
+                // Assume the player has hit the ball, if the two other coins are reasonably stationary
+                if (coins.size() == 2 && coins[1].framesTracked > 3 && coins[0].vel[2] < 20 && coins[1].vel[2] < 20)
                     ballMoving = true;
 
+                ball = -1;
+                ballID = -1;
                 framesWithoutMovement = 0;
             }
 
-            if (ballMoving && !prevBallMoving)
-            {
-                coinMoveStartPos[0] = (lastBallPosition[0] - img_background.cols * downscale * 0.5) * scale;
-                coinMoveStartPos[1] = (img_background.rows * downscale * 0.5 - lastBallPosition[1]) * scale;
-                coinMoveStartPos[2] = smoothedZ;
-            }
-
-            /*
+            // Keep track of the ball's position when it first moved (the player hits it)
             if (ballMoving)
             {
-                Point start(100, 100);
-                Point end(100, 200);
-                line(img_background2, start, end, Scalar(0, 0, 255), 5);
-            }*/
-        }
-        else 
-        {
-            if (startPos && coins.size() >= 3)
-            {
+                framesBallMoving++;
+                if (!prevBallMoving)
+                {
+                    coinMoveStartPos[0] = (lastBallPosition[0] - img_background.cols * downscale * 0.5) * scale;
+                    coinMoveStartPos[1] = (img_background.rows * downscale * 0.5 - lastBallPosition[1]) * scale;
+                    coinMoveStartPos[2] = smoothedZ;
 
+                    flag1Id = coins[0].id;
+                    flag2Id = coins[1].id;
+                    flag1Position = coins[0].pos2D;
+                    flag2Position = coins[1].pos2D;
+                    detectedGoalThisTurn = false;
+                    framesBallMoving = 0;
+                    framesWithoutMovement = 0;
+                    framesWithoutBall = 0;
+
+                    //std::cout << "Ball started moving\n";
+                }
+            }
+            else if (prevBallMoving)
+            {
+                flag1Id = flag2Id = -1;
+                framesBallMoving = 0;
+                //std::cout << "Ball stopped moving\n";
+            }
+
+            // We have found the ball
+            if (ball != -1)
+            {
+                ballID = coins[ball].id;
+                const Vec2f& ballPos = coins[ball].pos2D;
+
+                // Try to detect goals
+                if (ballMoving && !detectedGoalThisTurn)
+                {
+                    const Vec2f& pos1 = flag1Position; // Flag position 1
+                    const Vec2f& pos2 = flag2Position; // Flag position 2
+
+                    // Signed distance of ball to the line between the two flags
+                    float lastDist = (pos2[1] - lastBallPosition[1]) * (pos2[0] - pos1[0]) - (pos2[0] - lastBallPosition[0]) * (pos2[1] - pos1[1]);
+                    float dist = (pos2[1] - ballPos[1]) * (pos2[0] - pos1[0]) - (pos2[0] - ballPos[0]) * (pos2[1] - pos1[1]);
+                   
+                    // Ball is on the opposite side of the flags compared to last time
+                    if (signbit(lastDist) != signbit(dist))
+                    {
+                        bool betweenFlags = lineSegmentIntersection(lastBallPosition, ballPos, pos1, pos2); // The ball passes between the flags, not on to the sides
+
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || defined(_WIN64)
+                        PlaySound(TEXT(betweenFlags ? "goal.wav" : "goalMissed.wav"), NULL, SND_FILENAME | SND_ASYNC);
+#endif
+                        detectedGoalThisTurn = true;
+                        if (betweenFlags)
+                        {
+                            cout << "Goal" << "\n";
+
+                            goals++;
+                            lastGoal = glfwGetTime();
+                            goalFxSystem.emit(coins[0].pos3D, coins[1].pos3D, 20, 0);
+                        }
+                        else
+                        {
+                            cout << "Goal missed..." << "\n";
+                            goals--;
+                        }
+
+                        // Draw red or green line between flags
+                        Point start(cvRound(pos1[0] / downscale), cvRound(pos1[1] / downscale));
+                        Point end(cvRound(pos2[0] / downscale), cvRound(pos2[1] / downscale));
+                        line(img_background2, start, end, betweenFlags ? Scalar(0, 255, 0) : Scalar(0, 0, 255), 5);
+                    }
+
+                    /* Blue debug line
+                    Point start(cvRound(ballPos[0] / downscale), cvRound(ballPos[1] / downscale));
+                    Point end(cvRound(lastBallPosition[0] / downscale), cvRound(lastBallPosition[1] / downscale));
+                    line(img_background2, start, end, Scalar(255, 0, 0), 5);
+                    */
+                }
+
+                lastBallPosition = ballPos;
+            }
+            else
+                ballID = -1;
+
+            // test for final goal area
+            if (goals > goalsUntilFinalArea && ball != -1)
+            {
+                float x = (coins[ball].pos2D[0] - img_background.cols * downscale * 0.5) / ((float)img_background.rows * downscale) * 2;
+                float y = (img_background.rows * downscale * 0.5 - coins[ball].pos2D[1]) / ((float)img_background.rows * downscale) * 2;
+
+                // ball has reached goal area
+                if (x > targetAreaMin[0] && x < targetAreaMax[0] && y > targetAreaMin[1] && y < targetAreaMax[1])
+                {
+#if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || defined(_WIN64)
+                    PlaySound(TEXT("goal.wav"), NULL, SND_FILENAME | SND_ASYNC);
+#endif
+                    cout << "Victory!" << "\n";
+
+                    lastGameStateChange = glfwGetTime();
+                    gameState = GameState::VICTORY;
+                }
+            }
+        }
+        else // Not in game
+        {
+            // On the titlescreen detect if coins have been moved in the start-positions
+            if (startPos && coins.size() >= 3 && gameState == GameState::TITLE)
+            {
                 for (int i = 0; i < 3; ++i)
                 {
                     startPositions[i][2] = 0;
@@ -371,11 +591,14 @@ int main(int argc, char* argv[])
                         float dist = dx * dx + dy * dy;
                         if (dist < coinTracker.coinSize * coinTracker.coinSize && c.framesTracked > 2)
                         {
+                            // I'm abusing the z-Position of the vector as a boolean
                             startPositions[i][2] = 1;
                             break;
                         }
                     }
                 }
+
+                // All coins at the start position, start-game
                 if (startPositions[0][2] > 0.5 && startPositions[1][2] > 0.5 && startPositions[2][2] > 0.5)
                 {
                     gameState = GameState::GAME;
@@ -383,10 +606,12 @@ int main(int argc, char* argv[])
                 }
             }
 
+            // Also draw a ball on the title-screen
             if (coins.size() >= 3)
                 ball = 2;
         }
 
+        // For showing a tracking-lost message
         if (coins.size() < 3 || coins[0].framesTracked < 3)
             framesWithoutCoins++;
         else
@@ -398,14 +623,16 @@ int main(int argc, char* argv[])
         glfwPollEvents();
     }
 
+    coinTracker.cleanup();
     glfwTerminate();
     return 0;
 }
 
-
+// Setup all-kinds of graphics stuff
 void initGL(int argc, char* argv[])
 {
 
+    // ==== Lighting
     GLfloat zero[] = { 0, 0, 0, 1.0 };
     GLfloat one[] = { 1.0, 1.0, 1.0, 1.0 };
     GLfloat light_pos[] = { 0.5, 0.3, 1.0, 0 };
@@ -437,13 +664,17 @@ void initGL(int argc, char* argv[])
 
     glLightModelf(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);
     glLightModelfv(GL_LIGHT_MODEL_AMBIENT, zero);
-
     glEnable(GL_COLOR_MATERIAL);
+
+    // ==== For better graphics
+
     glEnable(GL_NORMALIZE);
     glEnable(GL_DITHER);
     glEnable(GL_FRAMEBUFFER_SRGB);
-    glEnable(GL_CULL_FACE);
 
+    // ==== Culling and depth
+
+    glEnable(GL_CULL_FACE);
     glClearColor(0., 0., 0., 1);
     glClearDepth(1);
     glDepthFunc(GL_LEQUAL);
@@ -452,7 +683,7 @@ void initGL(int argc, char* argv[])
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
-    // Shadowmapping with fixed-pipeline based on http://www.paulsprojects.net/tutorials/smt/smt.html
+    // === Shadowmapping with fixed-pipeline based on http://www.paulsprojects.net/tutorials/smt/smt.html
     glGenFramebuffers(1, &shadowFrameBuffer);
     glBindFramebuffer(GL_FRAMEBUFFER, shadowFrameBuffer);
 
@@ -532,6 +763,8 @@ void initGL(int argc, char* argv[])
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
 
+    // ==== 3d-models and textures
+
     soccerModel.init();
     shoeModel.init();
     coinModel.init();
@@ -545,6 +778,9 @@ void initGL(int argc, char* argv[])
     noMarkerTex.init();
     noTrackingTex.init();
     goalTex.init();
+    stripeTex.init();
+
+    // ==== Particlesystems
 
     float time = glfwGetTime();
     uiSystem.pos = cv::Vec3f(0, 0.25, 0);
@@ -600,11 +836,12 @@ void initGL(int argc, char* argv[])
     goalFxSystem.startColor2 = goalFxSystem.endColor2 = Vec4f(1, 1, 0, 0.4F);
     goalFxSystem.init(time);
 
-    int error = glGetError();
+    int error = glGetError(); // error-checking
     if (error)
         std::cout << gluErrorString(error) << " in init\n";
 }
 
+// Main-rendering
 void display(GLFWwindow* window, Mat &img_background, float* markerMatrix, vector<Coin>& coins, bool ball, bool marker)
 {
     float time = glfwGetTime();
@@ -657,6 +894,7 @@ void display(GLFWwindow* window, Mat &img_background, float* markerMatrix, vecto
     else
         glRasterPos2f(backgroundOffset, 0);
 
+    // drawing of the opencv image
     glDrawPixels(img_background.cols, img_background.rows, GL_BGR, GL_UNSIGNED_BYTE, img_background.data);
 
     // ========= Main-pass
@@ -717,6 +955,24 @@ void display(GLFWwindow* window, Mat &img_background, float* markerMatrix, vecto
         glVertex3f(1, 1, smoothedZ);
         glVertex3f(-1, 1, smoothedZ);
         glEnd();
+
+        if (marker)
+        {
+#ifdef CALIBRATION_HINT
+            glColorMask(1, 1, 1, 1);
+#endif
+            glColor4f(1, 0.5F, 0.2F,1);
+            glPushMatrix();
+            glMultTransposeMatrixf(markerMatrix);
+            glScalef(0.035F, 0.035F, 1.0F);
+            glBegin(GL_QUADS);
+            glVertex3f(-1, 1, 0);
+            glVertex3f(1, 1, 0);
+            glVertex3f(1, -1, 0);
+            glVertex3f(-1, -1, 0);
+            glEnd();
+            glPopMatrix();
+        }
         glColorMask(1, 1, 1, 1);
 
         // ========= Scene in shadow
@@ -755,6 +1011,25 @@ void display(GLFWwindow* window, Mat &img_background, float* markerMatrix, vecto
         glVertex3f(1, 1, smoothedZ);
         glVertex3f(-1, 1, smoothedZ);
         glEnd();
+
+        if (marker)
+        {
+#ifdef CALIBRATION_HINT
+            glColorMask(1, 1, 1, 1);
+#endif
+            glColor4f(1, 0.5F, 0.2F, 1);
+            glPushMatrix();
+            glMultTransposeMatrixf(markerMatrix);
+            glScalef(0.035F, 0.035F, 1.0F);
+            glBegin(GL_QUADS);
+            glVertex3f(-1, 1, 0);
+            glVertex3f(1, 1, 0);
+            glVertex3f(1, -1, 0);
+            glVertex3f(-1, -1, 0);
+            glEnd();
+            glPopMatrix();
+        }
+
         glColorMask(1, 1, 1, 1);
 
         // ========= Default scene
@@ -799,6 +1074,7 @@ void display(GLFWwindow* window, Mat &img_background, float* markerMatrix, vecto
 
 void drawScene(float* markerMatrix, vector<Coin>& coins, bool ball, bool marker, float time)
 {
+    // Draw shoe
     if (marker)
     {
         glPushMatrix();
@@ -807,8 +1083,9 @@ void drawScene(float* markerMatrix, vector<Coin>& coins, bool ball, bool marker,
 
         glScalef(0.075F, 0.075F, 0.075F);
         glRotatef(-180, 1, 0, 0);
+#if !CAMERA && VIDEO == 0 // The marker is rotated in one of our videos...
         glRotatef(-90, 0, 0, 1);
-        glTranslatef(-0.15F, 0, 0.05F);
+#endif
 
         shoeModel.draw();
 
@@ -855,11 +1132,14 @@ void drawScene(float* markerMatrix, vector<Coin>& coins, bool ball, bool marker,
         float randomizeOffset = c.id % 10;
          // drawFlag
         {
+            // Base
             drawCylinder(0.01, 0.001, 20);
             glColor4f(1.0, 0.5, 0.0, 1.0);
 
+            // Pole
             drawCylinder(0.001, 0.05, 20);
 
+            // Some grass 
             {
                 float radi = 0.01;
                 float width = 0.003;
@@ -893,6 +1173,7 @@ void drawScene(float* markerMatrix, vector<Coin>& coins, bool ball, bool marker,
                 glEnd();
             }
 
+            // Actual flag
             {
                 glColor4f(1.0, 0.8, 0.0, 1.0);
 
@@ -950,6 +1231,7 @@ void drawScene(float* markerMatrix, vector<Coin>& coins, bool ball, bool marker,
     }
 }
 
+// Transparent stuff (with no shadows)
 void drawOverlays(float* markerMatrix, vector<Coin>& coins, bool ball, bool marker, float time)
 {
     // Line between flags
@@ -969,7 +1251,6 @@ void drawOverlays(float* markerMatrix, vector<Coin>& coins, bool ball, bool mark
         dy /= dist;
 
         float offset = fmod(time, 1.0);
-
         int stripes = (ceil(dist / length)) * 2;
 
         glBegin(GL_QUAD_STRIP);
@@ -993,15 +1274,15 @@ void drawOverlays(float* markerMatrix, vector<Coin>& coins, bool ball, bool mark
     }
 
     // Arrow below ball 
-    if (ball && !ballMoving)
+    if (ball && !ballMoving && coins.size() >= 3)
     {
         const Vec3f& v1 = coins[2].pos3D;
         const Vec3f& v2 = (coins[0].pos3D + coins[1].pos3D) * 0.5;
 
+        // Make arrow rotate from ball to the mid-point between the flags
         float dx = v2[0] - v1[0];
         float dy = v2[1] - v1[1];
         float dist = sqrt(dx * dx + dy * dy);
-
         dx /= dist;
         dy /= dist;
 
@@ -1022,8 +1303,102 @@ void drawOverlays(float* markerMatrix, vector<Coin>& coins, bool ball, bool mark
         glEnd();
     }
 
+    // Goal area
+    if (goals > goalsUntilFinalArea && gameState == GameState::GAME)
+    {
+        double scale = 1.0 * tan(fov / 180.0 * M_PI * 0.5) * (-smoothedZ);
+        float texMin = fmod(1.0 - time * 0.25F, 1.0F);
+        float texMaxX = texMin + (targetAreaMax[0] - targetAreaMin[0]) * 100 * scale;
+        float texMaxY = texMin + (targetAreaMax[1] - targetAreaMin[1]) * 100 * scale;
+
+        // stripes
+        glColor4f(1.0, 1.0, 1.0, 0.05);
+        glEnable(GL_TEXTURE_2D);
+        stripeTex.bind();
+        glBegin(GL_QUADS);
+        glTexCoord2f(texMin, texMaxY);
+        glVertex3f(targetAreaMin[0] * scale, targetAreaMin[1] * scale, smoothedZ);
+        glTexCoord2f(texMaxX, texMaxY);
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMin[1] * scale, smoothedZ);
+        glTexCoord2f(texMaxX, texMin);
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMax[1] * scale, smoothedZ);
+        glTexCoord2f(texMin, texMin);
+        glVertex3f(targetAreaMin[0] * scale, targetAreaMax[1] * scale, smoothedZ);
+        glEnd();
+
+        // goal text
+        glColor4f(1.0, 1.0, 1.0, (cos(time * 5 * 0.5) * 0.125 + 0.25));
+        goalTex.bind();
+        glBegin(GL_QUADS);
+        float height = 0.01;
+        float width = height * goalTex.getWidth() / (float)goalTex.getHeight();
+        float x = (targetAreaMin[0] + targetAreaMax[0]) * 0.5 * scale;
+        float y = (targetAreaMin[1] + targetAreaMax[1]) * 0.5 * scale;
+        glTexCoord2f(0, 1);
+        glVertex3f(x - width, y - height, smoothedZ);
+        glTexCoord2f(1, 1);
+        glVertex3f(x + width, y - height, smoothedZ);
+        glTexCoord2f(1, 0);
+        glVertex3f(x + width, y + height, smoothedZ);
+        glTexCoord2f(0, 0);
+        glVertex3f(x - width, y + height, smoothedZ);
+        glEnd();
+        glDisable(GL_TEXTURE_2D);
+
+        // border
+        width = 0.005;
+        float length = 0.01 + cos(time * 5 * 0.5) * 0.0025;
+        glBegin(GL_TRIANGLE_STRIP);
+        glVertex3f(targetAreaMin[0] * scale, targetAreaMin[1] * scale + length, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale - width, targetAreaMin[1] * scale + length, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale, targetAreaMin[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale - width, targetAreaMin[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale, targetAreaMin[1] * scale , smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale, targetAreaMin[1] * scale - width, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale + length, targetAreaMin[1] * scale , smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale + length, targetAreaMin[1] * scale - width, smoothedZ);
+
+        glVertex3f(targetAreaMin[0] * scale + length, targetAreaMin[1] * scale - width, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale - length, targetAreaMin[1] * scale, smoothedZ);
+
+        glVertex3f(targetAreaMax[0] * scale - length, targetAreaMin[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale - length, targetAreaMin[1] * scale - width, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMin[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMin[1] * scale - width, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMin[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale + width, targetAreaMin[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMin[1] * scale + length, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale + width, targetAreaMin[1] * scale + length, smoothedZ);
+
+        glVertex3f(targetAreaMax[0] * scale + width, targetAreaMin[1] * scale + length, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMax[1] * scale - length, smoothedZ);
+
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMax[1] * scale - length, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale + width, targetAreaMax[1] * scale - length, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMax[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale + width, targetAreaMax[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMax[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale, targetAreaMax[1] * scale + width, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale - length, targetAreaMax[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMax[0] * scale - length, targetAreaMax[1] * scale + width, smoothedZ);
+
+        glVertex3f(targetAreaMax[0] * scale - length, targetAreaMax[1] * scale + width, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale + length, targetAreaMax[1] * scale, smoothedZ);
+
+        glVertex3f(targetAreaMin[0] * scale + length, targetAreaMax[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale + length, targetAreaMax[1] * scale + width, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale, targetAreaMax[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale, targetAreaMax[1] * scale + width, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale, targetAreaMax[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale - width, targetAreaMax[1] * scale, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale, targetAreaMax[1] * scale - length, smoothedZ);
+        glVertex3f(targetAreaMin[0] * scale - width, targetAreaMax[1] * scale - length, smoothedZ);
+        glEnd();
+    }
+
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
+    // Particle systems
     ballFxSystem.emitting = ballMoving;
     if (ball)
         ballFxSystem.moveToPos(coins[2].pos3D, time);
@@ -1032,6 +1407,7 @@ void drawOverlays(float* markerMatrix, vector<Coin>& coins, bool ball, bool mark
     goalFxSystem.draw(time);
 }
 
+// UI (title-screen / score / goal text)
 void drawUI(float time)
 {
     glDisable(GL_TEXTURE_2D);
@@ -1041,7 +1417,7 @@ void drawUI(float time)
     float goalAnim = min(1.0f, (time - lastGoal) / 0.75F);
     float t = min(1.0, (time - lastGameStateChange) / 0.5);
     t = gameState == GameState::TITLE ? 1 : gameState == GameState::VICTORY ? t : framesWithoutCoins > 15 ? 1 : 1 - t;
-    if (t > 0.01)
+    if (t > 0.01) // Dark-background
     {
         glBegin(GL_QUADS);
         glColor4f(0.0, 0.0, 0.0, 0.8 * t);
@@ -1052,6 +1428,7 @@ void drawUI(float time)
         glEnd();
     }
 
+    // Draw vignette 
     glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, vignetteTexture);
 
@@ -1082,6 +1459,7 @@ void drawUI(float time)
 
     if (gameState == GameState::TITLE)
     {
+        // CoinSoccAR text
         glColor4f(1.0, 1.0, 1.0, 1.0);
         titleTex.drawQuad(0, 0.7, 0.25);
 
@@ -1091,6 +1469,7 @@ void drawUI(float time)
         {
             moveCoinTex.drawQuad(0, 0.5, 0.075);
 
+            // Draw circles of the start-positions
             glColor4f(1.0, 1.0, 1.0, startPositions[0][2] > 0.5 ? 0 :  a);
             circleTex.drawQuad(startPositions[0][0], startPositions[0][1], 0.075);
             glColor4f(1.0, 1.0, 1.0, startPositions[1][2] > 0.5 ? 0 : a);
@@ -1107,6 +1486,8 @@ void drawUI(float time)
         glColor4f(1.0, 1.0, 1.0, 0.5);
         creditTex.drawQuad(0, -0.9, 0.075);
 
+
+        // Coin in the title-logo
         glEnable(GL_LIGHTING);
         glEnable(GL_LIGHT2);
         glEnable(GL_LIGHT0);
@@ -1148,16 +1529,16 @@ void drawUI(float time)
             noTrackingTex.drawQuad(0, 0, 0.25f);
         }
 		
-        if (goalAnim < 1)
+        if (goalAnim < 1.0F)
         {
             glColor4f(1.0, 1.0, 1.0, sin(goalAnim * M_PI));
-            float t = 1 - min(1, goalAnim * 2);
-            goalTex.drawQuad(0, 0.25, 0.15 + 0.05 * (1 - t * t));
+            float t = 1.0F - min(1.0F, goalAnim * 2);
+            goalTex.drawQuad(0, 0.25, 0.15 + 0.05 * (1.0F - t * t));
         }
 
 		//if (goals > 0) 
         {
-			glColor4f(1, 0, 0, 1);
+			glColor4f(goalAnim, 1, goalAnim, 1);
 			glRasterPos2f(-ratio + 0.2F, 0.8F);
 			std::string scoreText = "Score: ";
 			scoreText += std::to_string(goals);
@@ -1184,6 +1565,7 @@ void reshape(GLFWwindow* window, int width, int height)
 {
     windowWidth = width;
     windowHeight = height;
+    prevFov = fov;
     float ratio = width / (float)height;
 
     glMatrixMode(GL_PROJECTION);
