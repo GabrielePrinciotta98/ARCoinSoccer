@@ -18,6 +18,8 @@ OpenCV, FreeGlut, GLEW, GLFW
 For a demo see: 
 AR Coin SoccAR.mp4
 
+https://github.com/GabrielePrinciotta98/ARCoinSoccer/blob/main/AR%20Coin%20SoccAR.mp4
+
 # Playing Instructions:
 - By default the game opens one of the test videos, to switch to the webcam, uncomment the CAMERA define in Application.cpp.
 - Parameters like fov and coinSize for the tracking can be adjusted at runtime.
