@@ -24,7 +24,7 @@
 
 //#define CALIBRATION_HINT // Show a quad on the marker to adjust fov
 //#define CAMERA 1 // Use camera
-#define VIDEO 1 // If camera is disabled, use specified video
+#define VIDEO 3 // If camera is disabled, use specified video
 
 using namespace cv;
 using namespace std;

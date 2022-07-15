@@ -403,7 +403,6 @@ CMakeCache.txt
 *.sln
 *.vcxproj
 *.vcxproj.filters
-*.mp4
 *.cmake
 CMakeLists.txt
 
