@@ -16,7 +16,7 @@ This project was made using:
 OpenCV, FreeGlut, GLEW, GLFW
 
 For a demo see: 
-[AR Coin SoccAR.mp4](AR Coin SoccAR.mp4)
+AR Coin SoccAR.mp4
 
 # Playing Instructions:
 - By default the game opens one of the test videos, to switch to the webcam, uncomment the CAMERA define in Application.cpp.
